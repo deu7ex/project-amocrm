@@ -1,0 +1,131 @@
+services:
+    nginx:
+        build:
+            context: ${APP_PATH}
+            dockerfile: docker/nginx/Dockerfile
+        ports:
+            - "85:80"
+        volumes:
+            - "${APP_PATH}:/var/www"
+        depends_on:
+            - app
+
+    app:
+        build:
+            context: ${APP_PATH}
+            dockerfile: docker/Dockerfile
+        container_name: okk-app
+        restart: unless-stopped
+        ports:
+            - "8000:8000"
+        volumes:
+            - "${APP_PATH}:/var/www"
+        depends_on:
+            - db
+        environment:
+            DB_CONNECTION: ${DB_CONNECTION}
+            DB_HOST: db
+            DB_PORT: ${DB_PORT}
+            DB_DATABASE: ${DB_DATABASE}
+            DB_USERNAME: ${DB_USERNAME}
+            DB_PASSWORD: ${DB_PASSWORD}
+            QUEUE_CONNECTION: database
+
+    db:
+        image: postgres:14
+        container_name: okk-db
+        restart: always
+        environment:
+            POSTGRES_DB: ${DB_DATABASE}
+            POSTGRES_USER: ${DB_USERNAME}
+            POSTGRES_PASSWORD: ${DB_PASSWORD}
+        volumes:
+            - pgdata:/var/lib/postgresql/data
+            - ${APP_PATH}/docker/db/init.sql:/docker-entrypoint-initdb.d/init.sql
+        ports:
+            - "5432:5432"
+
+    queue:
+        build:
+            context: ${APP_PATH}
+            dockerfile: docker/Dockerfile
+        container_name: okk-queue
+        command: /bin/sh -c "sleep 23 && php artisan queue:work --tries=3 --timeout=60"
+        volumes:
+            - "${APP_PATH}:/var/www"
+        depends_on:
+            - app
+            - db
+
+    scheduler:
+        build:
+            context: ${APP_PATH}
+            dockerfile: docker/Dockerfile
+        container_name: okk-scheduler
+        command: /bin/sh -c "sleep 23 && php artisan schedule:work"
+        volumes:
+            - "${APP_PATH}:/var/www"
+        depends_on:
+            - app
+            - db
+
+    consumer-amo:
+        build:
+            context: ${APP_PATH}
+            dockerfile: docker/Dockerfile
+        container_name: okk-consumer-amo
+        command: /bin/sh -c "sleep 20 && php artisan rabbitmq:amo-consume"
+        volumes:
+            - "${APP_PATH}:/var/www"
+        depends_on:
+            - rabbitmq
+            - db
+        restart: unless-stopped
+
+    consumer-sheets:
+        build:
+            context: ${APP_PATH}
+            dockerfile: docker/Dockerfile
+        container_name: okk-consumer-sheets
+        command: /bin/sh -c "sleep 20 && php artisan rabbitmq:sheets-consume"
+        volumes:
+            - "${APP_PATH}:/var/www"
+        depends_on:
+            - rabbitmq
+            - db
+        restart: unless-stopped
+
+    consumer-vk:
+        build:
+            context: ${APP_PATH}
+            dockerfile: docker/Dockerfile
+        container_name: okk-consumer-vk
+        command: /bin/sh -c "sleep 20 && php artisan rabbitmq:vk-consume"
+        volumes:
+            - "${APP_PATH}:/var/www"
+        depends_on:
+            - rabbitmq
+            - db
+        restart: unless-stopped
+
+    rabbitmq:
+        image: rabbitmq:3-management
+        ports:
+            - "5672:5672"
+        environment:
+            RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+            RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+        healthcheck:
+            test: [ "CMD", "rabbitmq-diagnostics", "ping" ]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+        depends_on:
+            - app
+            - db
+
+
+volumes:
+    pgdata:
+        name: pgdata
+
